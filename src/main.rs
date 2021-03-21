@@ -2,11 +2,10 @@ use rand::distributions::{Distribution, Uniform};
 type Vec3 = nalgebra::Vector3<f32>;
 
 fn main() {
-    let n = 1 << 10;
+    let n = 1 << 4;
     let mut acc = vec![BoidAccumulator::default(); n];
     let mut boids = random_boids(n, 10.);
     let accel = build_accelerator(&mut boids, &mut acc);
-    dbg!(&accel);
 }
 
 fn random_boids(n: usize, scale: f32) -> Vec<Boid> {
@@ -81,10 +80,13 @@ fn build_accelerator(boids: &mut [Boid], acc: &mut [BoidAccumulator]) -> Vec<Opt
 
     let levels = 3;
     let mut total = 0;
-    for level in 0..levels {
-        for mask in 0..(2 << level) {
-            let plane_idx = total / 2;
-            println!("Level: {}, Mask: {:b}, Plane idx: {}", level, mask, plane_idx);
+    for level in 0..levels { // Tree depth
+        for mask in 0..(2 << level) { // Parent 
+            let plane_idx = total / 2; // Parent node idx
+            println!(
+                "Level: {}, Mask: {:b}, Plane idx: {}",
+                level, mask, plane_idx
+            );
             if let Some(plane) = &partitions[plane_idx as usize] {
                 select(boids, acc, level, mask, Some(plane));
                 bubble(acc);
@@ -117,18 +119,18 @@ fn select(
             Some(plane) => plane_side(boid.pos, plane),
             None => false,
         };
-        //dbg!(plane_face);
         let new_bit = if plane_face { 1 << mask_bit } else { 0 };
-        let full_mask = boid.part_mask | new_bit;
+            println!("New: {:b}", new_bit);
+        let full_bits = boid.part_mask | new_bit;
 
-        //eprintln!("Mask: {:b}", full_mask);
-        //if dbg!(full_mask == mask) {
-        if full_mask == mask {
+        if full_bits == mask {
             acc.pos = boid.pos;
             acc.heading = boid.heading;
             acc.count = 1;
-            boid.part_mask = full_mask;
+            println!("{:b} => {:b}", boid.part_mask, full_bits);
+            boid.part_mask = full_bits;
         } else {
+            println!("{:b}", boid.part_mask);
             acc.pos = Vec3::zeros();
             acc.heading = Vec3::zeros();
             acc.count = 0;
