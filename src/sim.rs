@@ -19,7 +19,7 @@ impl Simulation {
     pub fn step(&mut self, speed: f32) -> Vec<Plane> {
         let accel = build_accelerator(&mut self.boids, &mut self.acc, self.tree_depth);
         let leaves = (1 << (self.tree_depth)) as usize - 1;
-        motion(&mut self.boids, dbg!(&accel[leaves..]), speed);
+        motion(&mut self.boids, &accel[leaves..], speed);
         accel.into_iter().filter_map(|a| a).collect()
     }
 
@@ -29,7 +29,6 @@ impl Simulation {
 }
 
 fn motion(boids: &mut [Boid], tree: &[Option<Plane>], speed: f32) {
-    dbg!(tree.len());
     for boid in boids {
         // Averaging
         let mut avg_neighbor_direction = Vec3::zeros();
@@ -179,10 +178,12 @@ fn build_accelerator(boids: &mut [Boid], acc: &mut [BoidAccumulator], tree_depth
     bubble(acc);
     let mut partitions = vec![plane_from_acc0(acc).0];
 
+    eprintln!();
     let mut total = 0;
     // Tree depth
     for level in 0..tree_depth {
         // Mask for each leaf node
+        let mut on_this_level = 0;
         for mask in 0..(1 << level) {
             // Parent node idx
             let plane_idx = total; 
@@ -195,7 +196,9 @@ fn build_accelerator(boids: &mut [Boid], acc: &mut [BoidAccumulator], tree_depth
             if let Some(plane) = &partitions[plane_idx as usize] {
                 select(boids, acc, level, mask, plane);
                 bubble(acc);
+                on_this_level += dbg!(acc[0].left.count + acc[0].right.count);
                 let (left, right) = plane_from_acc0(acc);
+                dbg!(left.is_some(), right.is_some());
                 partitions.push(left);
                 partitions.push(right);
             } else {
@@ -205,6 +208,7 @@ fn build_accelerator(boids: &mut [Boid], acc: &mut [BoidAccumulator], tree_depth
 
             total += 1;
         }
+        dbg!(on_this_level);
         //eprintln!();
     }
 
@@ -229,11 +233,12 @@ fn select(
             zero.count = 0;
         }
 
+        println!("Mask: {:b} == {:b} Level: {} == {}", boid.mask, mask, boid.level, level);
         if boid.mask == mask && boid.level == level {
             let plane_face = plane_side(boid.pos, plane);
 
             // Basically push to a bit vec
-            let new_bit = if plane_face { 1 << level } else { 0 };
+            let new_bit = if plane_face { 0 } else { 1 << level };
             boid.mask |= new_bit;
             boid.level = level + 1;
 
