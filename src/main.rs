@@ -30,7 +30,7 @@ impl App for MyApp {
     type Args = ();
 
     fn new(engine: &mut dyn Engine, _args: Self::Args) -> Result<Self> {
-        let sim = Simulation::new(1 << 8, 3);
+        let sim = Simulation::new(1 << 14, 5);
 
         let lines_material = engine.add_material(UNLIT_VERT, UNLIT_FRAG, DrawType::Lines)?;
 
@@ -61,15 +61,17 @@ impl App for MyApp {
             println!("{} boid sim took {} ms", self.sim.boids().len(), elap.as_secs_f32() * 1000.);
         }
 
+        /*
         for plane in &self.planes {
             objects.push(Object {
                 material: self.lines_material,
                 mesh: self.plane_mesh,
                 transform: Matrix4::new_translation(&plane.pos) 
-                    //* point_towards(plane.normal),
+                    // * point_towards(plane.normal),
                     * point_towards(plane.heading),
             });
         }
+        */
 
         for boid in self.sim.boids() {
             objects.push(Object {

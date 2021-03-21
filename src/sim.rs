@@ -18,8 +18,10 @@ impl Simulation {
 
     pub fn step(&mut self, speed: f32) -> Vec<Plane> {
         let accel = build_accelerator(&mut self.boids, &mut self.acc, self.tree_depth);
+
         let leaves = (1 << (self.tree_depth)) as usize - 1;
         motion(&mut self.boids, &accel[leaves..], speed);
+
         accel.into_iter().filter_map(|a| a).collect()
     }
 
@@ -38,9 +40,10 @@ fn motion(boids: &mut [Boid], tree: &[Option<Plane>], speed: f32) {
 
         for plane in tree.iter().filter_map(|p| *p) {
             let offset = plane.pos - boid.pos;
-            avg_neighbor_direction += plane.heading.normalize();
+            let dist = offset.magnitude();
+            avg_neighbor_direction += plane.heading.normalize() / dist;
             avg_neighbor_offset += offset.normalize();
-            avg_dist += offset.magnitude();
+            avg_dist += dist;
             total_neighbors += 1;
         }
 
@@ -59,7 +62,7 @@ fn motion(boids: &mut [Boid], tree: &[Option<Plane>], speed: f32) {
                 avg_neighbor_direction * 0.12)
                 .normalize();
             if new_heading[0].is_nan() || new_heading[1].is_nan() || new_heading[2].is_nan() {
-                println!("{}", new_heading);
+                //println!("{}", new_heading);
             } else {
                 boid.heading = new_heading;
             }
@@ -138,16 +141,13 @@ fn plane_from_acc_half(half: &BoidAccumulatorHalf) -> Option<Plane> {
     let n = half.count as f32;
 
     // Pick an arbitrary axis to cross with
-    let axis = if half.heading.dot(&Vec3::y()) > 0. {
-        if half.heading.dot(&Vec3::z()) > 0. {
-            Vec3::z()
-        } else {
-            Vec3::y()
-        }
-    } else {
-        Vec3::x()
-    };
-    let normal = half.heading.cross(&axis).normalize();
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let normal = Vec3::new(
+        rng.gen_range(-1.0 .. 1.),
+        rng.gen_range(-1.0 .. 1.),
+        rng.gen_range(-1.0 .. 1.),
+    );
 
     Some(Plane {
         pos: half.pos / n,
@@ -157,9 +157,6 @@ fn plane_from_acc_half(half: &BoidAccumulatorHalf) -> Option<Plane> {
 }
 
 fn plane_from_acc0(acc: &[BoidAccumulator]) -> (Option<Plane>, Option<Plane>) {
-    //let left = acc[0].left.count;
-    //let right = acc[0].right.count;
-    //dbg!((left, right, left + right));
     (
         plane_from_acc_half(&acc[0].left),
         plane_from_acc_half(&acc[0].right)
@@ -183,22 +180,19 @@ fn build_accelerator(boids: &mut [Boid], acc: &mut [BoidAccumulator], tree_depth
     // Tree depth
     for level in 0..tree_depth {
         // Mask for each leaf node
-        let mut on_this_level = 0;
         for mask in 0..(1 << level) {
             // Parent node idx
             let plane_idx = total; 
 
-            eprintln!(
+            /*eprintln!(
                 "Level: {}, Mask: {:b}, Plane idx: {}",
                 level, mask, plane_idx
-            );
+            );*/
 
             if let Some(plane) = &partitions[plane_idx as usize] {
                 select(boids, acc, level, mask, plane);
                 bubble(acc);
-                on_this_level += dbg!(acc[0].left.count + acc[0].right.count);
                 let (left, right) = plane_from_acc0(acc);
-                dbg!(left.is_some(), right.is_some());
                 partitions.push(left);
                 partitions.push(right);
             } else {
@@ -208,7 +202,6 @@ fn build_accelerator(boids: &mut [Boid], acc: &mut [BoidAccumulator], tree_depth
 
             total += 1;
         }
-        dbg!(on_this_level);
         //eprintln!();
     }
 
@@ -233,7 +226,7 @@ fn select(
             zero.count = 0;
         }
 
-        println!("Mask: {:b} == {:b} Level: {} == {}", boid.mask, mask, boid.level, level);
+        //println!("Mask: {:b} == {:b} Level: {} == {}", boid.mask, mask, boid.level, level);
         if boid.mask == mask && boid.level == level {
             let plane_face = plane_side(boid.pos, plane);
 
