@@ -19,8 +19,8 @@ struct MyApp {
 
 fn point_towards(vec: Vector3<f32>) -> Matrix4<f32> {
     let y = vec.normalize();
-    let x = y.cross(&Vector3::y());
-    let z = x.cross(&y);
+    let x = y.cross(&Vector3::y()).normalize();
+    let z = x.cross(&y).normalize();
     nalgebra::Matrix3::from_columns(&[x, y, z]).to_homogeneous()
 }
 
@@ -65,7 +65,9 @@ impl App for MyApp {
             objects.push(Object {
                 material: self.lines_material,
                 mesh: self.plane_mesh,
-                transform: Matrix4::new_translation(&plane.pos) * point_towards(plane.normal),
+                transform: Matrix4::new_translation(&plane.pos) 
+                    //* point_towards(plane.normal),
+                    * point_towards(plane.heading),
             });
         }
 
