@@ -30,7 +30,7 @@ impl App for MyApp {
     type Args = ();
 
     fn new(engine: &mut dyn Engine, _args: Self::Args) -> Result<Self> {
-        let sim = Simulation::new(1 << 10, 3);
+        let sim = Simulation::new(1 << 3, 3);
 
         let lines_material = engine.add_material(UNLIT_VERT, UNLIT_FRAG, DrawType::Lines)?;
 
@@ -53,12 +53,12 @@ impl App for MyApp {
     fn next_frame(&mut self, engine: &mut dyn Engine) -> Result<FramePacket> {
         let mut objects = Vec::new();
 
-        //if self.frame % 60 == 0 {
-        {
+        if self.frame % 60 == 0 {
+        //{
             let start = std::time::Instant::now();
             self.planes = self.sim.step(0.04);
             let elap = start.elapsed();
-            println!("Sim took {} ms", elap.as_secs_f32() * 1000.);
+            println!("{} boid sim took {} ms", self.sim.boids().len(), elap.as_secs_f32() * 1000.);
         }
 
         for plane in &self.planes {
