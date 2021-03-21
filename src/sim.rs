@@ -41,10 +41,12 @@ fn motion(boids: &mut [Boid], tree: &[Option<Plane>], speed: f32) {
         for plane in tree.iter().filter_map(|p| *p) {
             let offset = plane.pos - boid.pos;
             let dist = offset.magnitude();
-            avg_neighbor_direction += plane.heading.normalize() / dist;
-            avg_neighbor_offset += offset.normalize();
-            avg_dist += dist;
-            total_neighbors += 1;
+            if dist < 5. {
+                avg_neighbor_direction += plane.heading.normalize();
+                avg_neighbor_offset += offset.normalize();
+                avg_dist += dist;
+                total_neighbors += 1;
+            }
         }
 
         if total_neighbors != 0 {
@@ -143,16 +145,18 @@ fn plane_from_acc_half(half: &BoidAccumulatorHalf) -> Option<Plane> {
     // Pick an arbitrary axis to cross with
     use rand::Rng;
     let mut rng = rand::thread_rng();
+    /*
     let normal = Vec3::new(
         rng.gen_range(-1.0 .. 1.),
         rng.gen_range(-1.0 .. 1.),
         rng.gen_range(-1.0 .. 1.),
     );
+    */
 
     Some(Plane {
         pos: half.pos / n,
         heading: half.heading / n,
-        normal,
+        normal: half.heading,
     })
 }
 
