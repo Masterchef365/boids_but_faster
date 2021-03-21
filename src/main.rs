@@ -24,7 +24,8 @@ fn random_boids(n: usize, scale: f32) -> Vec<Boid> {
                 unit.sample(&mut rng),
                 unit.sample(&mut rng),
             ),
-            part_mask: 0,
+            mask: 0,
+            level: 0,
         })
         .collect()
 }
@@ -33,7 +34,8 @@ fn random_boids(n: usize, scale: f32) -> Vec<Boid> {
 struct Boid {
     pos: Vec3,
     heading: Vec3,
-    part_mask: u32,
+    mask: u32,
+    level: u32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -65,7 +67,8 @@ fn plane_from_acc0(acc: &[BoidAccumulator]) -> Option<Plane> {
         return None;
     }
 
-    let n = dbg!(acc0.count) as f32;
+    //dbg!(acc0.count);
+    let n = acc0.count as f32;
     Some(Plane {
         pos: acc0.pos / n,
         normal: acc0.heading / n,
@@ -73,20 +76,28 @@ fn plane_from_acc0(acc: &[BoidAccumulator]) -> Option<Plane> {
 }
 
 fn build_accelerator(boids: &mut [Boid], acc: &mut [BoidAccumulator]) -> Vec<Option<Plane>> {
-    boids.iter_mut().for_each(|b| b.part_mask = 0);
+    boids.iter_mut().for_each(|b| {
+        b.level = 0;
+        b.mask = 0;
+    });
     select(boids, acc, 0, 0, None);
     bubble(acc);
     let mut partitions = vec![plane_from_acc0(acc)];
 
     let levels = 3;
     let mut total = 0;
-    for level in 0..levels { // Tree depth
-        for mask in 0..(2 << level) { // Parent 
-            let plane_idx = total / 2; // Parent node idx
+    // Tree depth
+    for level in 0..levels {
+        // Mask for each leaf node
+        for mask in 0..(2 << level) {
+            // Parent node idx
+            let plane_idx = total / 2; 
+
             println!(
                 "Level: {}, Mask: {:b}, Plane idx: {}",
                 level, mask, plane_idx
             );
+
             if let Some(plane) = &partitions[plane_idx as usize] {
                 select(boids, acc, level, mask, Some(plane));
                 bubble(acc);
@@ -94,6 +105,7 @@ fn build_accelerator(boids: &mut [Boid], acc: &mut [BoidAccumulator]) -> Vec<Opt
             } else {
                 partitions.push(None);
             }
+
             total += 1;
         }
         println!();
@@ -110,27 +122,23 @@ fn plane_side(pt: Vec3, plane: &Plane) -> bool {
 fn select(
     boids: &mut [Boid],
     acc: &mut [BoidAccumulator],
-    mask_bit: u32,
-    mask: u32, // All of the bits we select for before this plane
+    level: u32,
+    mask: u32,
     plane: Option<&Plane>,
 ) {
     for (boid, acc) in boids.iter_mut().zip(acc.iter_mut()) {
-        let plane_face = match plane {
-            Some(plane) => plane_side(boid.pos, plane),
-            None => false,
-        };
-        let new_bit = if plane_face { 1 << mask_bit } else { 0 };
-            println!("New: {:b}", new_bit);
-        let full_bits = boid.part_mask | new_bit;
-
-        if full_bits == mask {
+        if boid.mask == mask && boid.level == level {
             acc.pos = boid.pos;
             acc.heading = boid.heading;
             acc.count = 1;
-            println!("{:b} => {:b}", boid.part_mask, full_bits);
-            boid.part_mask = full_bits;
+            if let Some(plane) = plane {
+                let plane_face = plane_side(boid.pos, plane);
+                println!("\t{}", plane_face);
+                let new_bit = if plane_face { 1 << level } else { 0 };
+                boid.mask |= new_bit;
+                boid.level = level + 1;
+            }
         } else {
-            println!("{:b}", boid.part_mask);
             acc.pos = Vec3::zeros();
             acc.heading = Vec3::zeros();
             acc.count = 0;
