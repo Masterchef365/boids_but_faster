@@ -1,7 +1,8 @@
-use rand::distributions::{Distribution, Uniform};
-use bytemuck::{Zeroable, Pod};
-use std::fs::read;
 use anyhow::Result;
+use bytemuck::{Pod, Zeroable};
+use rand::distributions::{Distribution, Uniform};
+use rmds::{Buffer, Engine, Shader};
+use std::fs::read;
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
@@ -37,32 +38,78 @@ pub struct Accumulator {
 unsafe impl Zeroable for Accumulator {}
 unsafe impl Pod for Accumulator {}
 
-fn main() -> Result<()> {
-    let mut engine = rmds::Engine::new(true)?;
-    const LOCAL_X: usize = 16;
-    const WORK_GROUPS: usize = 40;
-    const N_BOIDS: usize = LOCAL_X * WORK_GROUPS;
+pub struct Simulation {
+    engine: Engine,
+    boids: Vec<Boid>,
+    work_groups: u32,
+    n_boids: u32,
+    boids_gpu: Buffer,
+    acc_gpu: Buffer,
+    setup: Shader,
+    reduce: Shader,
+}
 
-    let setup = engine.spirv(&read("kernels/setup.comp.spv")?)?;
-    let reduce = engine.spirv(&read("kernels/reduce.comp.spv")?)?;
+pub const LOCAL_X: u32 = 16;
+impl Simulation {
+    pub fn new(work_groups: u32) -> Result<Self> {
+        let mut engine = rmds::Engine::new(true)?;
+        let n_boids = work_groups * LOCAL_X;
 
-    let mut acc = vec![Accumulator::default(); N_BOIDS];
-    let boids = random_boids(N_BOIDS, 10.);
+        let setup = engine.spirv(&read("kernels/setup.comp.spv")?)?;
+        let reduce = engine.spirv(&read("kernels/reduce.comp.spv")?)?;
 
-    let acc_gpu = engine.buffer::<Accumulator>(N_BOIDS)?;
-    let boids_gpu = engine.buffer::<Boid>(N_BOIDS)?;
+        let acc_gpu = engine.buffer::<Accumulator>(n_boids as _)?;
+        let boids_gpu = engine.buffer::<Boid>(n_boids as _)?;
 
-    engine.write(boids_gpu, &boids)?;
-    engine.run(setup, acc_gpu, boids_gpu, WORK_GROUPS as _, 1, 1, &[])?;
-    let mut stride = 1u32;
-    while stride < N_BOIDS as u32 {
-        engine.run(reduce, acc_gpu, acc_gpu, WORK_GROUPS as _, 1, 1, &stride.to_le_bytes())?;
-        stride <<= 1;
+        let boids = random_boids(n_boids as _, 10.);
+        engine.write(boids_gpu, &boids)?;
+
+        Ok(Self {
+            n_boids,
+            acc_gpu,
+            boids_gpu,
+            engine,
+            work_groups,
+            setup,
+            reduce,
+            boids,
+        })
     }
-    engine.read(acc_gpu, &mut acc)?;
 
-    dbg!(acc[0]);
+    pub fn boids(&mut self) -> Result<&[Boid]> {
+        self.engine.read(self.boids_gpu, &mut self.boids)?;
+        Ok(&self.boids)
+    }
 
+    pub fn step(&mut self) -> Result<()> {
+        self.engine.run(self.setup, self.acc_gpu, self.boids_gpu, self.work_groups, 1, 1, &[])?;
+        dbg!(self.reduce()?);
+        Ok(())
+    }
+
+    fn reduce(&mut self) -> Result<Accumulator> {
+        let mut stride = 1u32;
+        while stride < self.n_boids {
+            self.engine.run(
+                self.reduce,
+                self.acc_gpu,
+                self.acc_gpu,
+                self.work_groups,
+                1,
+                1,
+                &stride.to_le_bytes(),
+            )?;
+            stride <<= 1;
+        }
+        let mut acc = [Accumulator::default()];
+        self.engine.read(self.acc_gpu, &mut acc)?;
+        Ok(acc[0])
+    }
+}
+
+fn main() -> Result<()> {
+    let mut sim = Simulation::new(16)?;
+    sim.step()?;
     Ok(())
 }
 
