@@ -116,6 +116,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cmake"
+version = "0.1.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb6210b637171dfba4cda12e579ac6dc73f5165ad56133e5d72ef3131f320855"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "cocoa"
 version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -312,9 +321,11 @@ name = "fast_boids"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "klystron",
  "nalgebra",
  "rand 0.8.3",
+ "rmds",
 ]
 
 [[package]]
@@ -477,7 +488,7 @@ dependencies = [
  "log",
  "nalgebra",
  "openxr",
- "vk_core",
+ "vk_core 0.1.0 (git+https://github.com/Masterchef365/vk_core.git?branch=main)",
  "winit",
 ]
 
@@ -1043,6 +1054,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41cc0f7e4d5d4544e8861606a285bb08d3e70712ccc7d2b84d7c0ccfaf4b05ce"
 
 [[package]]
+name = "rmds"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "erupt",
+ "genmap",
+ "gpu-alloc",
+ "gpu-alloc-erupt",
+ "shaderc",
+ "vk_core 0.1.0 (git+https://github.com/Masterchef365/vk_core.git?branch=descriptor_set_allocator)",
+]
+
+[[package]]
 name = "rusttype"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1082,6 +1107,26 @@ name = "serde"
 version = "1.0.124"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd761ff957cb2a45fbb9ab3da6512de9de55872866160b23c25f1a841e99d29f"
+
+[[package]]
+name = "shaderc"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ca37955a53b37fa20380c414aec5343ab76b6993ebfd86e74facd7209bac577"
+dependencies = [
+ "libc",
+ "shaderc-sys",
+]
+
+[[package]]
+name = "shaderc-sys"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da6962db4d543df2fb613d76e6f4c7bcf58ff3300709c92f2349239955ce0a9f"
+dependencies = [
+ "cmake",
+ "libc",
+]
 
 [[package]]
 name = "simba"
@@ -1204,6 +1249,17 @@ name = "unicode-xid"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7fe0bb3479651439c9112f72b6c505038574c9fbb575ed1bf3b797fa39dd564"
+
+[[package]]
+name = "vk_core"
+version = "0.1.0"
+source = "git+https://github.com/Masterchef365/vk_core.git?branch=descriptor_set_allocator#37d3f6ec5018e6cb7a91c6c8023a17b56ddda493"
+dependencies = [
+ "anyhow",
+ "erupt",
+ "gpu-alloc",
+ "gpu-alloc-erupt",
+]
 
 [[package]]
 name = "vk_core"

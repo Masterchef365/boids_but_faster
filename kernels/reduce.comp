@@ -1,0 +1,27 @@
+#version 450
+layout (local_size_x = 16) in;
+
+#include "shared.glsl"
+
+layout(std430, binding = 0) buffer Acc {
+    Accumulator acc[];
+};
+
+layout(std430, push_constant) uniform Params {
+    uint stride;
+};
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    uint base = gid * stride * 2;
+    uint other = base + stride;
+    if (other >= acc.length()) return;
+
+    acc[base].left.pos += acc[other].left.pos;
+    acc[base].left.heading += acc[other].left.heading;
+    acc[base].left.count += acc[other].left.count;
+
+    acc[base].right.pos += acc[other].right.pos;
+    acc[base].right.heading += acc[other].right.heading;
+    acc[base].right.count += acc[other].right.count;
+}
