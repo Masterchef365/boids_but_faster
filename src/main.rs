@@ -40,10 +40,11 @@ unsafe impl Pod for Accumulator {}
 fn main() -> Result<()> {
     let mut engine = rmds::Engine::new(true)?;
     const LOCAL_X: usize = 16;
-    const WORK_GROUPS: usize = 16;
+    const WORK_GROUPS: usize = 40;
     const N_BOIDS: usize = LOCAL_X * WORK_GROUPS;
 
-    let setup = engine.spirv(&read("kernels/select.comp.spv")?)?;
+    let setup = engine.spirv(&read("kernels/setup.comp.spv")?)?;
+    let reduce = engine.spirv(&read("kernels/reduce.comp.spv")?)?;
 
     let mut acc = vec![Accumulator::default(); N_BOIDS];
     let boids = random_boids(N_BOIDS, 10.);
@@ -52,10 +53,15 @@ fn main() -> Result<()> {
     let boids_gpu = engine.buffer::<Boid>(N_BOIDS)?;
 
     engine.write(boids_gpu, &boids)?;
-    engine.run(setup, acc_gpu, boids_gpu, WORK_GROUPS as _, 0, 0, &[])?;
+    engine.run(setup, acc_gpu, boids_gpu, WORK_GROUPS as _, 1, 1, &[])?;
+    let mut stride = 1u32;
+    while stride < N_BOIDS as u32 {
+        engine.run(reduce, acc_gpu, acc_gpu, WORK_GROUPS as _, 1, 1, &stride.to_le_bytes())?;
+        stride <<= 1;
+    }
     engine.read(acc_gpu, &mut acc)?;
 
-    dbg!(acc);
+    dbg!(acc[0]);
 
     Ok(())
 }

@@ -13,5 +13,6 @@ struct AccumulatorHalf {
 };
 
 struct Accumulator {
-    AccumulatorHalf left, right;
+    AccumulatorHalf left;
+    AccumulatorHalf right;
 };
