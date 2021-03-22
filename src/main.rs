@@ -35,7 +35,7 @@ impl App for MyApp {
     type Args = ();
 
     fn new(engine: &mut dyn Engine, _args: Self::Args) -> Result<Self> {
-        let sim = Simulation::new(16, 5)?;
+        let sim = Simulation::new(16, 3)?;
 
         let lines_material = engine.add_material(UNLIT_VERT, UNLIT_FRAG, DrawType::Lines)?;
 

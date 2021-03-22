@@ -22,7 +22,7 @@ pub struct AccumulatorHalf {
     pub pos: [f32; 3],
     pub count: u32,
     pub heading: [f32; 3],
-    _filler: u32,
+    pub _filler: u32,
 }
 
 unsafe impl Zeroable for AccumulatorHalf {}
@@ -50,14 +50,28 @@ pub struct SelectParams {
 unsafe impl Zeroable for SelectParams {}
 unsafe impl Pod for SelectParams {}
 
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct MotionParams {
+    pub n_groups: u32,
+    pub speed: f32,
+    pub dist_thresh: f32,
+    pub cohere: f32,
+    pub steer: f32,
+    pub parallel: f32,
+}
+
+unsafe impl Zeroable for MotionParams {}
+unsafe impl Pod for MotionParams {}
+
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct Group {
     pub center: [f32; 3],
-    _filler0: u32,
+    pub _filler0: u32,
     pub heading: [f32; 3],
-    _filler1: u32,
+    pub _filler1: u32,
 }
 
 unsafe impl Zeroable for Group {}
@@ -139,11 +153,10 @@ impl Simulation {
         let acc = self.reduce()?;
         let mut partitions = vec![acc_to_group(acc.left)];
 
-        let tree_depth = 5;
-
+        // Build acceleration tree
         let mut total = 0;
         // Tree depth
-        for level in 0..tree_depth {
+        for level in 0..self.tree_depth {
             // Mask for each leaf node
             for mask in 0..(1 << level) {
                 // Parent node idx
@@ -169,6 +182,30 @@ impl Simulation {
             }
             eprintln!();
         }
+
+        // Simulation
+        let leaves = (1 << (self.tree_depth)) as usize - 1;
+        let groups: Vec<Group> = partitions[leaves..].iter().filter_map(|a| *a).collect();
+        self.engine.write(self.groups_gpu, &groups)?;
+
+        let motion_params = MotionParams {
+            n_groups: groups.len() as _,
+            speed: 0.04,
+            dist_thresh: 5.,
+            cohere: 0.5,
+            steer: 0.12,
+            parallel: 0.12,
+        };
+
+        self.engine.run(
+            self.motion,
+            self.groups_gpu,
+            self.boids_gpu,
+            self.work_groups,
+            1,
+            1,
+            bytemuck::cast_slice(&[motion_params]),
+        )?;
 
 
         Ok(())

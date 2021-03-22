@@ -17,6 +17,7 @@ layout(std430, binding = 1) buffer Boids {
 };
 
 layout(std430, push_constant) uniform Params {
+    uint n_groups;
     float speed; // 0.004
     float dist_thresh; // 5.0
     float cohere; // 0.5
@@ -32,7 +33,7 @@ void main() {
     vec3 avg_heading = vec3(0);
     float avg_dist = 0.;
     uint total = 0;
-    for (int g = 0; g < groups.length(); g++) {
+    for (int g = 0; g < n_groups; g++) {
         vec3 off = boids[gid].pos - groups[g].center.xyz;
         float dist = length(off);
         if (dist < dist_thresh) {
