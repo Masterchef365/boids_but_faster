@@ -101,7 +101,7 @@ fn boid() -> (Vec<Vertex>, Vec<u16>) {
     let color = [1.; 3];
     let vertices = vec![
         Vertex::new([0.0, 0.0, 0.0], color),
-        Vertex::new([0.0, 1.0, 0.0], color),
+        Vertex::new([0.0, 0.2, 0.0], color),
     ];
 
     let indices = vec![0, 1];
