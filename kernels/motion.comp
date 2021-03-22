@@ -36,14 +36,14 @@ void main() {
         Boid other = read[i];
         vec3 off = boid.pos - other.pos;
         float dist = length(off);
-        if (dist > dist_thresh) {
-            dist *= 1000.;
-        }
-        float dist_sq = dist * dist;
+        if (dist < dist_thresh) {
+        float dist_sq = 1.;
+        //float dist_sq = dist * dist;
         avg_off += normalize(off) / dist_sq;
         avg_heading += normalize(other.heading) / dist_sq;
         avg_dist += dist;
         total += 1;
+        }
         //}
     }
 
