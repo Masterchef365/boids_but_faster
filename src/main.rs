@@ -1,12 +1,13 @@
 mod sim;
-use sim::{Simulation, Settings};
+use sim::{Settings, Simulation};
 
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use klystron::{
     runtime_3d::{launch, App},
     DrawType, Engine, FramePacket, Material, Matrix4, Mesh, Object, Vertex, UNLIT_FRAG, UNLIT_VERT,
 };
 use nalgebra::Vector3;
+use std::fs::read;
 
 pub fn main() -> Result<()> {
     let vr = std::env::args().skip(1).next().is_some();
@@ -18,12 +19,10 @@ pub fn main() -> Result<()> {
             serde_yaml::to_writer(file, &Settings::default())?;
             return Ok(());
         }
-        Ok(f) => {
-            serde_yaml::from_reader(f).context("Parsing failed")?
-        },
+        Ok(f) => serde_yaml::from_reader(f).context("Parsing failed")?,
         e => {
             return e.context("Failed to read settings.yml").map(|_| ());
-        },
+        }
     };
 
     launch::<MyApp>(vr, settings)
@@ -51,7 +50,11 @@ impl App for MyApp {
     fn new(engine: &mut dyn Engine, settings: Self::Args) -> Result<Self> {
         let sim = Simulation::new(settings)?;
 
-        let lines_material = engine.add_material(UNLIT_VERT, UNLIT_FRAG, DrawType::Lines)?;
+        let lines_material = engine.add_material(
+            &read("./shaders/unlit.vert.spv")?,
+            &read("./shaders/unlit.frag.spv")?,
+            DrawType::Lines,
+        )?;
 
         let (vertices, indices) = boid();
         let boid_mesh = engine.add_mesh(&vertices, &indices)?;
@@ -68,17 +71,22 @@ impl App for MyApp {
         let mut objects = Vec::new();
 
         //if self.frame % 10 == 0 {
-            let start = std::time::Instant::now();
-            self.sim.step()?;
-            let elap = start.elapsed();
-            println!("{} boid sim took {} ms", self.sim.boids()?.len(), elap.as_secs_f32() * 1000.);
+        let start = std::time::Instant::now();
+        self.sim.step()?;
+        let elap = start.elapsed();
+        println!(
+            "{} boid sim took {} ms",
+            self.sim.boids()?.len(),
+            elap.as_secs_f32() * 1000.
+        );
         //}
 
         for boid in self.sim.boids()? {
             objects.push(Object {
                 material: self.lines_material,
                 mesh: self.boid_mesh,
-                transform: Matrix4::new_translation(&Vector3::from(boid.pos)) * point_towards(Vector3::from(boid.heading)),
+                transform: Matrix4::new_translation(&Vector3::from(boid.pos))
+                    * point_towards(Vector3::from(boid.heading)),
             });
         }
 

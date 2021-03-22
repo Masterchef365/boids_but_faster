@@ -1071,6 +1071,7 @@ checksum = "41cc0f7e4d5d4544e8861606a285bb08d3e70712ccc7d2b84d7c0ccfaf4b05ce"
 [[package]]
 name = "rmds"
 version = "0.1.0"
+source = "git+https://github.com/Masterchef365/rmds.git?branch=staging_buffers#1c42cbf459e272e19bac778eea18def4b6d0bec6"
 dependencies = [
  "anyhow",
  "bytemuck",
