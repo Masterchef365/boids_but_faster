@@ -1,7 +1,7 @@
 ---
-downsample: 128
+downsample: 256
 work_groups: 2048
-speed: 0.002
+speed: 0.008
 dist_thresh: 2.0
 cohere: 0.8
 steer: 0.035
