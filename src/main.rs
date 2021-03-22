@@ -1,5 +1,5 @@
 mod sim;
-use sim::Simulation;
+use sim::{Simulation, Group};
 
 use anyhow::Result;
 use klystron::{
@@ -18,7 +18,7 @@ struct MyApp {
     sim: Simulation,
     boid_mesh: Mesh,
     plane_mesh: Mesh,
-    //planes: Vec<Plane>,
+    planes: Vec<Group>,
     frame: u32,
 }
 
@@ -35,7 +35,7 @@ impl App for MyApp {
     type Args = ();
 
     fn new(engine: &mut dyn Engine, _args: Self::Args) -> Result<Self> {
-        let sim = Simulation::new(16, 3)?;
+        let sim = Simulation::new(180, 3)?;
 
         let lines_material = engine.add_material(UNLIT_VERT, UNLIT_FRAG, DrawType::Lines)?;
 
@@ -48,7 +48,7 @@ impl App for MyApp {
         Ok(Self {
             plane_mesh,
             sim,
-            //planes: Vec::new(),
+            planes: Vec::new(),
             boid_mesh,
             lines_material,
             frame: 0,
@@ -58,24 +58,22 @@ impl App for MyApp {
     fn next_frame(&mut self, engine: &mut dyn Engine) -> Result<FramePacket> {
         let mut objects = Vec::new();
 
-        //if self.frame % 60 == 0 {
-        let start = std::time::Instant::now();
-        //self.planes = self.sim.step(0.04);
-        self.sim.step()?;
-        let elap = start.elapsed();
-        println!("{} boid sim took {} ms", self.sim.boids()?.len(), elap.as_secs_f32() * 1000.);
+        if self.frame % 60 == 0 {
+            let start = std::time::Instant::now();
+            self.planes = self.sim.step()?;
+            let elap = start.elapsed();
+            println!("{} boid sim took {} ms", self.sim.boids()?.len(), elap.as_secs_f32() * 1000.);
+        }
 
-        /*
         for plane in &self.planes {
             objects.push(Object {
                 material: self.lines_material,
                 mesh: self.plane_mesh,
-                transform: Matrix4::new_translation(&plane.pos) 
+                transform: Matrix4::new_translation(&Vector3::from(plane.center)) 
                     // * point_towards(plane.normal),
-                    * point_towards(plane.heading),
+                    * point_towards(Vector3::from(plane.heading)),
             });
         }
-        */
 
         for boid in self.sim.boids()? {
             objects.push(Object {

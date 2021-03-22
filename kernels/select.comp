@@ -39,7 +39,7 @@ void main() {
         bool plane_face = dot(
             boids[gid].pos - plane_pos, 
             plane_normal
-        ) < 0.;
+        ) > 0.;
 
         // Insert the new bit into this boid's tree mask
         boids[gid].level += 1;

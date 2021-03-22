@@ -108,7 +108,7 @@ impl Simulation {
 
         let acc_gpu = engine.buffer::<Accumulator>(n_boids as _)?;
         let boids_gpu = engine.buffer::<Boid>(n_boids as _)?;
-        let groups_gpu = engine.buffer::<Group>((1 << tree_depth) - 1)?;
+        let groups_gpu = engine.buffer::<Group>(1 << tree_depth)?;
 
         let boids = random_boids(n_boids as _, 10.);
         engine.write(boids_gpu, &boids)?;
@@ -138,7 +138,11 @@ impl Simulation {
         Ok(&self.boids)
     }
 
-    pub fn step(&mut self) -> Result<()> {
+    pub fn step(&mut self) -> Result<Vec<Group>> {
+        eprintln!();
+        eprintln!();
+        eprintln!();
+
         // Setup
         self.boids_dirty = true;
         self.engine.run(
@@ -158,6 +162,7 @@ impl Simulation {
         // Tree depth
         for level in 0..self.tree_depth {
             // Mask for each leaf node
+            let mut level_count = 0;
             for mask in 0..(1 << level) {
                 // Parent node idx
                 let plane_idx = total; 
@@ -170,7 +175,7 @@ impl Simulation {
                 if let Some(plane) = partitions[plane_idx as usize] {
                     self.select(level, mask, plane)?;
                     let acc = self.reduce()?;
-                    dbg!(acc);
+                    level_count += dbg!(acc.left.count) + dbg!(acc.right.count);
                     partitions.push(acc_to_group(acc.left));
                     partitions.push(acc_to_group(acc.right));
                 } else {
@@ -180,6 +185,7 @@ impl Simulation {
 
                 total += 1;
             }
+            dbg!(level_count);
             eprintln!();
         }
 
@@ -191,7 +197,7 @@ impl Simulation {
         let motion_params = MotionParams {
             n_groups: groups.len() as _,
             speed: 0.04,
-            dist_thresh: 5.,
+            dist_thresh: 3.,
             cohere: 0.5,
             steer: 0.12,
             parallel: 0.12,
@@ -207,8 +213,7 @@ impl Simulation {
             bytemuck::cast_slice(&[motion_params]),
         )?;
 
-
-        Ok(())
+        Ok(groups)
     }
 
     fn select(&mut self, level: u32, mask: u32, plane: Group) -> Result<()> {
@@ -219,7 +224,7 @@ impl Simulation {
             plane_normal: plane.heading,
         };
         self.engine.run(
-            self.setup,
+            self.select,
             self.acc_gpu,
             self.boids_gpu,
             self.work_groups,
@@ -253,7 +258,12 @@ fn acc_to_group(acc: AccumulatorHalf) -> Option<Group> {
     (acc.count > 0).then(|| {
         let c = acc.count as f32;
         let [x, y, z] = acc.pos;
-        let [hx, hy, hz] = acc.heading;
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let hx = rng.gen_range(-1.0..1.0);
+        let hy = rng.gen_range(-1.0..1.0);
+        let hz = rng.gen_range(-1.0..1.0);
+        //let [hx, hy, hz] = acc.heading;
         Group {
             center: [x / c, y / c, z / c],
             heading: [hx / c, hy / c, hz / c],
