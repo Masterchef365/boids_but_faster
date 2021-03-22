@@ -30,16 +30,21 @@ void main() {
     float avg_dist = 0.;
     uint total = 0;
     for (uint i = 0; i < read.length(); i += downsample) {
+        if (gid == i) {
+            continue;
+        }
         Boid other = read[i];
         vec3 off = boid.pos - other.pos;
         float dist = length(off);
         if (dist < dist_thresh) {
-            float dist_sq = dist * dist;
-            avg_off += normalize(off) / dist_sq;
-            avg_heading += normalize(other.heading) / dist_sq;
-            avg_dist += dist;
-            total += 1;
+            dist *= 1000.;
         }
+        float dist_sq = dist * dist;
+        avg_off += normalize(off) / dist_sq;
+        avg_heading += normalize(other.heading) / dist_sq;
+        avg_dist += dist;
+        total += 1;
+        //}
     }
 
     if (total > 0) {
