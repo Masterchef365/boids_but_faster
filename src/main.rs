@@ -1,136 +1,120 @@
+mod sim;
+use sim::Simulation;
+
 use anyhow::Result;
-use bytemuck::{Pod, Zeroable};
-use rand::distributions::{Distribution, Uniform};
-use rmds::{Buffer, Engine, Shader};
-use std::fs::read;
+use klystron::{
+    runtime_3d::{launch, App},
+    DrawType, Engine, FramePacket, Material, Matrix4, Mesh, Object, Vertex, UNLIT_FRAG, UNLIT_VERT,
+};
+use nalgebra::Vector3;
 
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct Boid {
-    pub pos: [f32; 3],
-    pub level: u32,
-    pub heading: [f32; 3],
-    pub mask: u32,
+pub fn main() -> Result<()> {
+    let vr = std::env::args().skip(1).next().is_some();
+    launch::<MyApp>(vr, ())
 }
 
-unsafe impl Zeroable for Boid {}
-unsafe impl Pod for Boid {}
-
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct AccumulatorHalf {
-    pub pos: [f32; 3],
-    pub count: u32,
-    pub heading: [f32; 3],
-    pub _filler: u32,
+struct MyApp {
+    lines_material: Material,
+    sim: Simulation,
+    boid_mesh: Mesh,
+    plane_mesh: Mesh,
+    //planes: Vec<Plane>,
+    frame: u32,
 }
 
-unsafe impl Zeroable for AccumulatorHalf {}
-unsafe impl Pod for AccumulatorHalf {}
-
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct Accumulator {
-    pub left: AccumulatorHalf,
-    pub right: AccumulatorHalf,
+fn point_towards(vec: Vector3<f32>) -> Matrix4<f32> {
+    let y = vec.normalize();
+    let x = y.cross(&Vector3::y()).normalize();
+    let z = x.cross(&y).normalize();
+    nalgebra::Matrix3::from_columns(&[x, y, z]).to_homogeneous()
 }
 
-unsafe impl Zeroable for Accumulator {}
-unsafe impl Pod for Accumulator {}
+impl App for MyApp {
+    const NAME: &'static str = "Boids";
 
-pub struct Simulation {
-    engine: Engine,
-    boids: Vec<Boid>,
-    work_groups: u32,
-    n_boids: u32,
-    boids_gpu: Buffer,
-    acc_gpu: Buffer,
-    setup: Shader,
-    reduce: Shader,
-}
+    type Args = ();
 
-pub const LOCAL_X: u32 = 16;
-impl Simulation {
-    pub fn new(work_groups: u32) -> Result<Self> {
-        let mut engine = rmds::Engine::new(true)?;
-        let n_boids = work_groups * LOCAL_X;
+    fn new(engine: &mut dyn Engine, _args: Self::Args) -> Result<Self> {
+        let sim = Simulation::new(16)?;
 
-        let setup = engine.spirv(&read("kernels/setup.comp.spv")?)?;
-        let reduce = engine.spirv(&read("kernels/reduce.comp.spv")?)?;
+        let lines_material = engine.add_material(UNLIT_VERT, UNLIT_FRAG, DrawType::Lines)?;
 
-        let acc_gpu = engine.buffer::<Accumulator>(n_boids as _)?;
-        let boids_gpu = engine.buffer::<Boid>(n_boids as _)?;
+        let (vertices, indices) = boid();
+        let boid_mesh = engine.add_mesh(&vertices, &indices)?;
 
-        let boids = random_boids(n_boids as _, 10.);
-        engine.write(boids_gpu, &boids)?;
+        let (vertices, indices) = plane(10.);
+        let plane_mesh = engine.add_mesh(&vertices, &indices)?;
 
         Ok(Self {
-            n_boids,
-            acc_gpu,
-            boids_gpu,
-            engine,
-            work_groups,
-            setup,
-            reduce,
-            boids,
+            plane_mesh,
+            sim,
+            //planes: Vec::new(),
+            boid_mesh,
+            lines_material,
+            frame: 0,
         })
     }
 
-    pub fn boids(&mut self) -> Result<&[Boid]> {
-        self.engine.read(self.boids_gpu, &mut self.boids)?;
-        Ok(&self.boids)
-    }
+    fn next_frame(&mut self, engine: &mut dyn Engine) -> Result<FramePacket> {
+        let mut objects = Vec::new();
 
-    pub fn step(&mut self) -> Result<()> {
-        self.engine.run(self.setup, self.acc_gpu, self.boids_gpu, self.work_groups, 1, 1, &[])?;
-        dbg!(self.reduce()?);
-        Ok(())
-    }
+        //if self.frame % 60 == 0 {
+        let start = std::time::Instant::now();
+        //self.planes = self.sim.step(0.04);
+        self.sim.step()?;
+        let elap = start.elapsed();
+        println!("{} boid sim took {} ms", self.sim.boids()?.len(), elap.as_secs_f32() * 1000.);
 
-    fn reduce(&mut self) -> Result<Accumulator> {
-        let mut stride = 1u32;
-        while stride < self.n_boids {
-            self.engine.run(
-                self.reduce,
-                self.acc_gpu,
-                self.acc_gpu,
-                self.work_groups,
-                1,
-                1,
-                &stride.to_le_bytes(),
-            )?;
-            stride <<= 1;
+        /*
+        for plane in &self.planes {
+            objects.push(Object {
+                material: self.lines_material,
+                mesh: self.plane_mesh,
+                transform: Matrix4::new_translation(&plane.pos) 
+                    // * point_towards(plane.normal),
+                    * point_towards(plane.heading),
+            });
         }
-        let mut acc = [Accumulator::default()];
-        self.engine.read(self.acc_gpu, &mut acc)?;
-        Ok(acc[0])
+        */
+
+        for boid in self.sim.boids()? {
+            objects.push(Object {
+                material: self.lines_material,
+                mesh: self.boid_mesh,
+                transform: Matrix4::new_translation(&Vector3::from(boid.pos)) * point_towards(Vector3::from(boid.heading)),
+            });
+        }
+
+        engine.update_time_value(self.frame as f32 / 100.)?;
+        self.frame += 1;
+
+        Ok(FramePacket { objects })
     }
 }
 
-fn main() -> Result<()> {
-    let mut sim = Simulation::new(16)?;
-    sim.step()?;
-    Ok(())
+fn boid() -> (Vec<Vertex>, Vec<u16>) {
+    let color = [1.; 3];
+    let vertices = vec![
+        Vertex::new([0.0, 0.0, 0.0], color),
+        Vertex::new([0.0, 1.0, 0.0], color),
+    ];
+
+    let indices = vec![0, 1];
+
+    (vertices, indices)
 }
 
-fn random_boids(n: usize, scale: f32) -> Vec<Boid> {
-    let mut rng = rand::thread_rng();
-    let unit = Uniform::new(-1., 1.);
-    let cube = Uniform::new(-scale, scale);
-    (0..n)
-        .map(|_| Boid {
-            pos: [
-                cube.sample(&mut rng),
-                cube.sample(&mut rng),
-                cube.sample(&mut rng),
-            ],
-            heading: [
-                unit.sample(&mut rng),
-                unit.sample(&mut rng),
-                unit.sample(&mut rng),
-            ],
-            mask: 0,
-            level: 0,
-        })
-        .collect()
+fn plane(size: f32) -> (Vec<Vertex>, Vec<u16>) {
+    let color = [1., 0.3, 0.];
+    let vertices = vec![
+        Vertex::new([size, size, 0.], color),
+        Vertex::new([size, -size, 0.], color),
+        Vertex::new([-size, -size, 0.], color),
+        Vertex::new([-size, size, 0.], color),
+    ];
+
+    let indices = vec![0, 1, 1, 2, 2, 3, 3, 0];
+
+    (vertices, indices)
 }
+

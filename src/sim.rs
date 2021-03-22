@@ -1,77 +1,122 @@
+use anyhow::Result;
+use bytemuck::{Pod, Zeroable};
 use rand::distributions::{Distribution, Uniform};
-type Vec3 = nalgebra::Vector3<f32>;
+use rmds::{Buffer, Engine, Shader};
+use std::fs::read;
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct Boid {
+    pub pos: [f32; 3],
+    pub level: u32,
+    pub heading: [f32; 3],
+    pub mask: u32,
+}
+
+unsafe impl Zeroable for Boid {}
+unsafe impl Pod for Boid {}
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct AccumulatorHalf {
+    pub pos: [f32; 3],
+    pub count: u32,
+    pub heading: [f32; 3],
+    pub _filler: u32,
+}
+
+unsafe impl Zeroable for AccumulatorHalf {}
+unsafe impl Pod for AccumulatorHalf {}
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct Accumulator {
+    pub left: AccumulatorHalf,
+    pub right: AccumulatorHalf,
+}
+
+unsafe impl Zeroable for Accumulator {}
+unsafe impl Pod for Accumulator {}
 
 pub struct Simulation {
-    acc: Vec<BoidAccumulator>,
+    engine: Engine,
     boids: Vec<Boid>,
-    tree_depth: u32,
+    work_groups: u32,
+    n_boids: u32,
+    boids_gpu: Buffer,
+    acc_gpu: Buffer,
+    setup: Shader,
+    reduce: Shader,
+    boids_dirty: bool,
 }
 
+pub const LOCAL_X: u32 = 16;
 impl Simulation {
-    pub fn new(n: usize, tree_depth: u32) -> Self {
-        Self {
-            acc: vec![BoidAccumulator::default(); n],
-            boids: random_boids(n, 10.),
-            tree_depth,
+    pub fn new(work_groups: u32) -> Result<Self> {
+        let mut engine = rmds::Engine::new(true)?;
+        let n_boids = work_groups * LOCAL_X;
+
+        let setup = engine.spirv(&read("kernels/setup.comp.spv")?)?;
+        let reduce = engine.spirv(&read("kernels/reduce.comp.spv")?)?;
+
+        let acc_gpu = engine.buffer::<Accumulator>(n_boids as _)?;
+        let boids_gpu = engine.buffer::<Boid>(n_boids as _)?;
+
+        let boids = random_boids(n_boids as _, 10.);
+        engine.write(boids_gpu, &boids)?;
+
+        Ok(Self {
+            n_boids,
+            acc_gpu,
+            boids_gpu,
+            engine,
+            work_groups,
+            setup,
+            reduce,
+            boids,
+            boids_dirty: false,
+        })
+    }
+
+    pub fn boids(&mut self) -> Result<&[Boid]> {
+        if self.boids_dirty {
+            self.engine.read(self.boids_gpu, &mut self.boids)?;
+            self.boids_dirty = false;
         }
+        Ok(&self.boids)
     }
 
-    pub fn step(&mut self, speed: f32) -> Vec<Plane> {
-        let accel = build_accelerator(&mut self.boids, &mut self.acc, self.tree_depth);
-
-        let leaves = (1 << (self.tree_depth)) as usize - 1;
-        motion(&mut self.boids, &accel[leaves..], speed);
-
-        accel.into_iter().filter_map(|a| a).collect()
+    pub fn step(&mut self) -> Result<()> {
+        self.boids_dirty = true;
+        self.engine.run(self.setup, self.acc_gpu, self.boids_gpu, self.work_groups, 1, 1, &[])?;
+        dbg!(self.reduce()?);
+        Ok(())
     }
 
-    pub fn boids(&self) -> &[Boid] {
-        &self.boids
+    fn reduce(&mut self) -> Result<Accumulator> {
+        let mut stride = 1u32;
+        while stride < self.n_boids {
+            self.engine.run(
+                self.reduce,
+                self.acc_gpu,
+                self.acc_gpu,
+                self.work_groups,
+                1,
+                1,
+                &stride.to_le_bytes(),
+            )?;
+            stride <<= 1;
+        }
+        let mut acc = [Accumulator::default()];
+        self.engine.read(self.acc_gpu, &mut acc)?;
+        Ok(acc[0])
     }
 }
 
-fn motion(boids: &mut [Boid], tree: &[Option<Plane>], speed: f32) {
-    for boid in boids {
-        // Averaging
-        let mut avg_neighbor_direction = Vec3::zeros();
-        let mut avg_neighbor_offset = Vec3::zeros();
-        let mut avg_dist = 0.;
-        let mut total_neighbors = 0;
-
-        for plane in tree.iter().filter_map(|p| *p) {
-            let offset = plane.pos - boid.pos;
-            let dist = offset.magnitude();
-            if dist < 5. {
-                avg_neighbor_direction += plane.heading.normalize();
-                avg_neighbor_offset += offset.normalize();
-                avg_dist += dist;
-                total_neighbors += 1;
-            }
-        }
-
-        if total_neighbors != 0 {
-            avg_neighbor_direction.normalize_mut();
-            avg_neighbor_offset.normalize_mut();
-            avg_dist /= total_neighbors as f32;
-
-            // Behaviour
-            let cohere = (0.5 - avg_dist).max(0.).min(1.);
-            let away = boid.heading.cross(&avg_neighbor_offset);
-            let closeavoid = away.lerp(&avg_neighbor_offset, cohere);
-
-            let new_heading = (boid.heading + //.
-                closeavoid * 0.12 +  //.
-                avg_neighbor_direction * 0.12)
-                .normalize();
-            if new_heading[0].is_nan() || new_heading[1].is_nan() || new_heading[2].is_nan() {
-                //println!("{}", new_heading);
-            } else {
-                boid.heading = new_heading;
-            }
-        }
-
-        boid.pos += boid.heading * speed;
-    }
+fn main() -> Result<()> {
+    let mut sim = Simulation::new(16)?;
+    sim.step()?;
+    Ok(())
 }
 
 fn random_boids(n: usize, scale: f32) -> Vec<Boid> {
@@ -80,205 +125,18 @@ fn random_boids(n: usize, scale: f32) -> Vec<Boid> {
     let cube = Uniform::new(-scale, scale);
     (0..n)
         .map(|_| Boid {
-            pos: Vec3::new(
+            pos: [
                 cube.sample(&mut rng),
                 cube.sample(&mut rng),
                 cube.sample(&mut rng),
-            ),
-            heading: Vec3::new(
+            ],
+            heading: [
                 unit.sample(&mut rng),
                 unit.sample(&mut rng),
                 unit.sample(&mut rng),
-            ),
+            ],
             mask: 0,
             level: 0,
         })
         .collect()
 }
-
-#[derive(Debug, Copy, Clone)]
-pub struct Boid {
-    pub pos: Vec3,
-    pub heading: Vec3,
-    mask: u32,
-    level: u32,
-}
-
-#[derive(Debug, Copy, Clone)]
-struct BoidAccumulatorHalf {
-    pos: Vec3,
-    heading: Vec3,
-    count: u32,
-}
-
-#[derive(Default, Debug, Copy, Clone)]
-struct BoidAccumulator {
-    left: BoidAccumulatorHalf,
-    right: BoidAccumulatorHalf,
-}
-
-impl Default for BoidAccumulatorHalf {
-    fn default() -> Self {
-        Self {
-            pos: Vec3::zeros(),
-            heading: Vec3::zeros(),
-            count: 0,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct Plane {
-    pub pos: Vec3,
-    pub normal: Vec3,
-    pub heading: Vec3,
-    // TODO: Weight param?
-}
-
-fn plane_from_acc_half(half: &BoidAccumulatorHalf) -> Option<Plane> {
-    if half.count == 0 {
-        return None;
-    }
-
-    let n = half.count as f32;
-
-    // Pick an arbitrary axis to cross with
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    /*
-    let normal = Vec3::new(
-        rng.gen_range(-1.0 .. 1.),
-        rng.gen_range(-1.0 .. 1.),
-        rng.gen_range(-1.0 .. 1.),
-    );
-    */
-
-    Some(Plane {
-        pos: half.pos / n,
-        heading: half.heading / n,
-        normal: half.heading,
-    })
-}
-
-fn plane_from_acc0(acc: &[BoidAccumulator]) -> (Option<Plane>, Option<Plane>) {
-    (
-        plane_from_acc_half(&acc[0].left),
-        plane_from_acc_half(&acc[0].right)
-    )
-}
-
-fn build_accelerator(boids: &mut [Boid], acc: &mut [BoidAccumulator], tree_depth: u32) -> Vec<Option<Plane>> {
-    // Reset
-    boids.iter_mut().for_each(|b| {
-        b.level = 0;
-        b.mask = 0;
-    });
-
-    // Make initial partition
-    root_select(boids, acc);
-    bubble(acc);
-    let mut partitions = vec![plane_from_acc0(acc).0];
-
-    eprintln!();
-    let mut total = 0;
-    // Tree depth
-    for level in 0..tree_depth {
-        // Mask for each leaf node
-        for mask in 0..(1 << level) {
-            // Parent node idx
-            let plane_idx = total; 
-
-            /*eprintln!(
-                "Level: {}, Mask: {:b}, Plane idx: {}",
-                level, mask, plane_idx
-            );*/
-
-            if let Some(plane) = &partitions[plane_idx as usize] {
-                select(boids, acc, level, mask, plane);
-                bubble(acc);
-                let (left, right) = plane_from_acc0(acc);
-                partitions.push(left);
-                partitions.push(right);
-            } else {
-                partitions.push(None);
-                partitions.push(None);
-            }
-
-            total += 1;
-        }
-        //eprintln!();
-    }
-
-    partitions
-}
-
-fn plane_side(pt: Vec3, plane: &Plane) -> bool {
-    (pt - plane.pos).dot(&plane.normal) > 0.
-}
-
-fn select(
-    boids: &mut [Boid],
-    acc: &mut [BoidAccumulator],
-    level: u32,
-    mask: u32,
-    plane: &Plane,
-) {
-    for (boid, acc) in boids.iter_mut().zip(acc.iter_mut()) {
-        for zero in [&mut acc.left, &mut acc.right].iter_mut() {
-            zero.pos = Vec3::zeros();
-            zero.heading = Vec3::zeros();
-            zero.count = 0;
-        }
-
-        //println!("Mask: {:b} == {:b} Level: {} == {}", boid.mask, mask, boid.level, level);
-        if boid.mask == mask && boid.level == level {
-            let plane_face = plane_side(boid.pos, plane);
-
-            // Basically push to a bit vec
-            let new_bit = if plane_face { 0 } else { 1 << level };
-            boid.mask |= new_bit;
-            boid.level = level + 1;
-
-            // Set and zero opposite planes
-            let set = match plane_face { 
-                true => &mut acc.left,
-                false => &mut acc.right,
-            };
-
-            set.pos = boid.pos;
-            set.heading = boid.heading;
-            set.count = 1;
-        }
-    }
-}
-
-fn root_select(boids: &[Boid], acc: &mut [BoidAccumulator]) {
-    for (boid, acc) in boids.iter().zip(acc.iter_mut()) {
-        acc.left.pos = boid.pos;
-        acc.left.heading = boid.heading;
-        acc.left.count = 1;
-    }
-}
-
-fn bubble(acc: &mut [BoidAccumulator]) {
-    let mut stride = 2;
-    while stride <= acc.len() {
-        bubble_step(acc, stride);
-        stride <<= 1;
-    }
-}
-
-fn bubble_step(acc: &mut [BoidAccumulator], stride: usize) {
-    for invoke_idx in 0..acc.len() / stride {
-        let base_idx = invoke_idx * stride;
-        let other_idx = base_idx + stride / 2;
-        acc[base_idx].left.pos += acc[other_idx].left.pos;
-        acc[base_idx].left.heading += acc[other_idx].left.heading;
-        acc[base_idx].left.count += acc[other_idx].left.count;
-
-        acc[base_idx].right.pos += acc[other_idx].right.pos;
-        acc[base_idx].right.heading += acc[other_idx].right.heading;
-        acc[base_idx].right.count += acc[other_idx].right.count;
-    }
-}
-
