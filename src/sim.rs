@@ -18,42 +18,8 @@ unsafe impl Pod for Boid {}
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct AccumulatorHalf {
-    pub pos: [f32; 3],
-    pub count: u32,
-    pub heading: [f32; 3],
-    pub _filler: u32,
-}
-
-unsafe impl Zeroable for AccumulatorHalf {}
-unsafe impl Pod for AccumulatorHalf {}
-
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct Accumulator {
-    pub left: AccumulatorHalf,
-    pub right: AccumulatorHalf,
-}
-
-unsafe impl Zeroable for Accumulator {}
-unsafe impl Pod for Accumulator {}
-
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct SelectParams {
-    pub plane_pos: [f32; 3],
-    pub mask: u32,
-    pub plane_normal: [f32; 3],
-    pub level: u32,
-}
-
-unsafe impl Zeroable for SelectParams {}
-unsafe impl Pod for SelectParams {}
-
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
 pub struct MotionParams {
-    pub n_groups: u32,
+    pub downsample: u32,
     pub speed: f32,
     pub dist_thresh: f32,
     pub cohere: f32,
@@ -64,37 +30,24 @@ pub struct MotionParams {
 unsafe impl Zeroable for MotionParams {}
 unsafe impl Pod for MotionParams {}
 
-
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct Group {
-    pub center: [f32; 3],
-    pub _filler0: u32,
-    pub heading: [f32; 3],
-    pub _filler1: u32,
-}
-
-unsafe impl Zeroable for Group {}
-unsafe impl Pod for Group {}
-
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Copy, Clone)]
 pub struct Settings {
+    pub downsample: u32,
     pub work_groups: u32,
     pub speed: f32,
     pub dist_thresh: f32,
     pub cohere: f32,
     pub steer: f32,
     pub parallel: f32,
-    pub tree_depth: u32,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            downsample: 1,
             work_groups: 40,
-            tree_depth: 6,
             speed: 0.04,
             dist_thresh: 8.,
             cohere: 0.5,
@@ -106,7 +59,7 @@ impl Default for Settings {
 
 fn motion_params_from_settings(settings: &Settings) -> MotionParams {
     MotionParams {
-        n_groups: LOCAL_X * settings.work_groups,
+        downsample: settings.downsample,
         dist_thresh: settings.dist_thresh,
         cohere: settings.cohere,
         speed: settings.speed,
@@ -120,187 +73,80 @@ pub struct Simulation {
     boids: Vec<Boid>,
     settings: Settings,
     n_boids: u32,
-    boids_gpu: Buffer,
-    groups_gpu: Buffer,
-    acc_gpu: Buffer,
-    setup: Shader,
-    reduce: Shader,
+    boids_gpu_a: Buffer,
+    boids_gpu_b: Buffer,
     motion: Shader,
-    select: Shader,
     boids_dirty: bool,
+    buf_select: bool,
 }
 
 pub const LOCAL_X: u32 = 16;
 impl Simulation {
     pub fn new(settings: Settings) -> Result<Self> {
         assert!(settings.work_groups > 0);
-        assert!(settings.tree_depth > 0);
         let mut engine = rmds::Engine::new(true)?;
         let n_boids = settings.work_groups * LOCAL_X;
 
-        let setup = engine.spirv(&read("kernels/setup.comp.spv")?)?;
-        let reduce = engine.spirv(&read("kernels/reduce.comp.spv")?)?;
         let motion = engine.spirv(&read("kernels/motion.comp.spv")?)?;
-        let select = engine.spirv(&read("kernels/select.comp.spv")?)?;
 
-        let acc_gpu = engine.buffer::<Accumulator>(n_boids as _)?;
-        let boids_gpu = engine.buffer::<Boid>(n_boids as _)?;
-        let groups_gpu = engine.buffer::<Group>(1 << settings.tree_depth)?;
+        let boids_gpu_a = engine.buffer::<Boid>(n_boids as _)?;
+        let boids_gpu_b = engine.buffer::<Boid>(n_boids as _)?;
 
         let boids = random_boids(n_boids as _, 10.);
-        engine.write(boids_gpu, &boids)?;
+        engine.write(boids_gpu_a, &boids)?;
 
         Ok(Self {
             n_boids,
-            groups_gpu,
             settings,
-            acc_gpu,
-            boids_gpu,
             engine,
-            setup,
-            reduce,
+            boids_gpu_a,
+            boids_gpu_b,
             boids,
             motion,
-            select,
+            buf_select: false,
             boids_dirty: false,
         })
     }
 
     pub fn boids(&mut self) -> Result<&[Boid]> {
         if self.boids_dirty {
-            self.engine.read(self.boids_gpu, &mut self.boids)?;
+            self.engine.read(
+                if self.buf_select {
+                    self.boids_gpu_b
+                } else {
+                    self.boids_gpu_a
+                },
+                &mut self.boids,
+            )?;
             self.boids_dirty = false;
         }
         Ok(&self.boids)
     }
 
-    pub fn step(&mut self) -> Result<Vec<Group>> {
-        // Setup
+    pub fn step(&mut self) -> Result<()> {
         self.boids_dirty = true;
-        self.engine.run(
-            self.setup,
-            self.acc_gpu,
-            self.boids_gpu,
-            self.settings.work_groups,
-            1,
-            1,
-            &[],
-        )?;
-        let acc = self.reduce()?;
-        let mut partitions = vec![acc_to_group(acc.left)];
-
-        // Build acceleration tree
-        let mut total = 0;
-        // Tree depth
-        for level in 0..self.settings.tree_depth {
-            // Mask for each leaf node
-            //let mut level_count = 0;
-            for mask in 0..(1 << level) {
-                // Parent node idx
-                let plane_idx = total; 
-
-                /*eprintln!(
-                    "Level: {}, Mask: {:b}, Plane idx: {}",
-                    level, mask, plane_idx
-                );*/
-
-                if let Some(plane) = partitions[plane_idx as usize] {
-                    self.select(level, mask, plane)?;
-                    let acc = self.reduce()?;
-                    //level_count += dbg!(acc.left.count) + dbg!(acc.right.count);
-                    //level_count += acc.left.count + acc.right.count;
-                    partitions.push(acc_to_group(acc.left));
-                    partitions.push(acc_to_group(acc.right));
-                } else {
-                    partitions.push(None);
-                    partitions.push(None);
-                }
-
-                total += 1;
-            }
-            //dbg!((level, level_count));
-            //eprintln!();
-        }
-
-        // Simulation
-        let leaves = (1 << (self.settings.tree_depth)) as usize - 1;
-        let groups: Vec<Group> = partitions[leaves..].iter().filter_map(|a| *a).collect();
-        self.engine.write(self.groups_gpu, &groups)?;
 
         let motion_params = motion_params_from_settings(&self.settings);
 
+        let (read_buf, write_buf) = match self.buf_select {
+            false => (self.boids_gpu_a, self.boids_gpu_b),
+            true => (self.boids_gpu_b, self.boids_gpu_a),
+        };
+
         self.engine.run(
             self.motion,
-            self.groups_gpu,
-            self.boids_gpu,
+            read_buf,
+            write_buf,
             self.settings.work_groups,
             1,
             1,
             bytemuck::cast_slice(&[motion_params]),
         )?;
 
-        Ok(groups)
+        self.buf_select = !self.buf_select;
+
+        Ok(())
     }
-
-    fn select(&mut self, level: u32, mask: u32, plane: Group) -> Result<()> {
-        let select_params = SelectParams {
-            level,
-            mask,
-            plane_pos: plane.center,
-            plane_normal: plane.heading,
-        };
-        self.engine.run(
-            self.select,
-            self.acc_gpu,
-            self.boids_gpu,
-            self.settings.work_groups,
-            1,
-            1,
-            bytemuck::cast_slice(&[select_params]),
-        )
-    }
-
-    fn reduce(&mut self) -> Result<Accumulator> {
-        let mut stride = 1u32;
-        while stride < self.n_boids {
-            self.engine.run(
-                self.reduce,
-                self.acc_gpu,
-                self.acc_gpu,
-                self.settings.work_groups,
-                1,
-                1,
-                &stride.to_le_bytes(),
-            )?;
-            stride <<= 1;
-        }
-        let mut acc = [Accumulator::default()];
-        self.engine.read(self.acc_gpu, &mut acc)?;
-        Ok(acc[0])
-    }
-}
-
-fn acc_to_group(acc: AccumulatorHalf) -> Option<Group> {
-    (acc.count > 0).then(|| {
-        let c = acc.count as f32;
-        let [x, y, z] = acc.pos;
-
-        /*
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        let hx = rng.gen_range(-1.0..1.0);
-        let hy = rng.gen_range(-1.0..1.0);
-        let hz = rng.gen_range(-1.0..1.0);
-        */
-
-        let [hx, hy, hz] = acc.heading;
-        Group {
-            center: [x / c, y / c, z / c],
-            heading: [hx / c, hy / c, hz / c],
-            _filler0: 0,
-            _filler1: 0,
-        }
-    })
 }
 
 fn random_boids(n: usize, scale: f32) -> Vec<Boid> {

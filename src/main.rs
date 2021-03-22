@@ -1,5 +1,5 @@
 mod sim;
-use sim::{Simulation, Group, Settings};
+use sim::{Simulation, Settings};
 
 use anyhow::{Result, Context};
 use klystron::{
@@ -33,8 +33,6 @@ struct MyApp {
     lines_material: Material,
     sim: Simulation,
     boid_mesh: Mesh,
-    plane_mesh: Mesh,
-    planes: Vec<Group>,
     frame: u32,
 }
 
@@ -58,13 +56,8 @@ impl App for MyApp {
         let (vertices, indices) = boid();
         let boid_mesh = engine.add_mesh(&vertices, &indices)?;
 
-        let (vertices, indices) = plane(10.);
-        let plane_mesh = engine.add_mesh(&vertices, &indices)?;
-
         Ok(Self {
-            plane_mesh,
             sim,
-            planes: Vec::new(),
             boid_mesh,
             lines_material,
             frame: 0,
@@ -76,21 +69,10 @@ impl App for MyApp {
 
         //if self.frame % 10 == 0 {
             let start = std::time::Instant::now();
-            self.planes = self.sim.step()?;
-            dbg!(self.planes.len());
+            self.sim.step()?;
             let elap = start.elapsed();
             println!("{} boid sim took {} ms", self.sim.boids()?.len(), elap.as_secs_f32() * 1000.);
         //}
-
-        for plane in &self.planes {
-            objects.push(Object {
-                material: self.lines_material,
-                mesh: self.plane_mesh,
-                transform: Matrix4::new_translation(&Vector3::from(plane.center)) 
-                    // * point_towards(plane.normal),
-                    * point_towards(Vector3::from(plane.heading)),
-            });
-        }
 
         for boid in self.sim.boids()? {
             objects.push(Object {
@@ -118,18 +100,3 @@ fn boid() -> (Vec<Vertex>, Vec<u16>) {
 
     (vertices, indices)
 }
-
-fn plane(size: f32) -> (Vec<Vertex>, Vec<u16>) {
-    let color = [1., 0.3, 0.];
-    let vertices = vec![
-        Vertex::new([size, size, 0.], color),
-        Vertex::new([size, -size, 0.], color),
-        Vertex::new([-size, -size, 0.], color),
-        Vertex::new([-size, size, 0.], color),
-    ];
-
-    let indices = vec![0, 1, 1, 2, 2, 3, 3, 0];
-
-    (vertices, indices)
-}
-
