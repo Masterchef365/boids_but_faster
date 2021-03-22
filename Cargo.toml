@@ -11,3 +11,5 @@ anyhow = "1"
 klystron = { path = "../klystron" }
 rmds = { path = "../rmds" }
 bytemuck = "1.4"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.8"

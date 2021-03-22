@@ -45,13 +45,12 @@ void main() {
         boids[gid].level += 1;
 
         if (plane_face) {
-            // Set the bit for this face
-            boids[gid].mask |= 1 << level;
-
             acc[gid].left.pos = boids[gid].pos;
             acc[gid].left.heading = boids[gid].heading;
             acc[gid].left.count = 1;
         } else {
+            // Set the bit for this face
+            boids[gid].mask |= 1 << level;
             acc[gid].right.pos = boids[gid].pos;
             acc[gid].right.heading = boids[gid].heading;
             acc[gid].right.count = 1;

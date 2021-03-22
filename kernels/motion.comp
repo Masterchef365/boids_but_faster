@@ -37,8 +37,9 @@ void main() {
         vec3 off = boids[gid].pos - groups[g].center.xyz;
         float dist = length(off);
         if (dist < dist_thresh) {
-            avg_off += normalize(off);
-            avg_heading += groups[g].heading.xyz;
+            float dist_sq = dist * dist;
+            avg_off += normalize(off) / dist_sq;
+            avg_heading += normalize(groups[g].heading.xyz) / dist_sq;
             avg_dist += dist;
             total += 1;
         }

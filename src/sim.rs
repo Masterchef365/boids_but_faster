@@ -77,14 +77,51 @@ pub struct Group {
 unsafe impl Zeroable for Group {}
 unsafe impl Pod for Group {}
 
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize, Copy, Clone)]
+pub struct Settings {
+    pub work_groups: u32,
+    pub speed: f32,
+    pub dist_thresh: f32,
+    pub cohere: f32,
+    pub steer: f32,
+    pub parallel: f32,
+    pub tree_depth: u32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            work_groups: 40,
+            tree_depth: 6,
+            speed: 0.04,
+            dist_thresh: 8.,
+            cohere: 0.5,
+            steer: 0.12,
+            parallel: 0.12,
+        }
+    }
+}
+
+fn motion_params_from_settings(settings: &Settings) -> MotionParams {
+    MotionParams {
+        n_groups: LOCAL_X * settings.work_groups,
+        dist_thresh: settings.dist_thresh,
+        cohere: settings.cohere,
+        speed: settings.speed,
+        steer: settings.steer,
+        parallel: settings.parallel,
+    }
+}
+
 pub struct Simulation {
     engine: Engine,
     boids: Vec<Boid>,
-    work_groups: u32,
+    settings: Settings,
     n_boids: u32,
     boids_gpu: Buffer,
     groups_gpu: Buffer,
-    tree_depth: u32,
     acc_gpu: Buffer,
     setup: Shader,
     reduce: Shader,
@@ -95,11 +132,11 @@ pub struct Simulation {
 
 pub const LOCAL_X: u32 = 16;
 impl Simulation {
-    pub fn new(work_groups: u32, tree_depth: u32) -> Result<Self> {
-        assert!(work_groups > 0);
-        assert!(tree_depth > 0);
+    pub fn new(settings: Settings) -> Result<Self> {
+        assert!(settings.work_groups > 0);
+        assert!(settings.tree_depth > 0);
         let mut engine = rmds::Engine::new(true)?;
-        let n_boids = work_groups * LOCAL_X;
+        let n_boids = settings.work_groups * LOCAL_X;
 
         let setup = engine.spirv(&read("kernels/setup.comp.spv")?)?;
         let reduce = engine.spirv(&read("kernels/reduce.comp.spv")?)?;
@@ -108,7 +145,7 @@ impl Simulation {
 
         let acc_gpu = engine.buffer::<Accumulator>(n_boids as _)?;
         let boids_gpu = engine.buffer::<Boid>(n_boids as _)?;
-        let groups_gpu = engine.buffer::<Group>(1 << tree_depth)?;
+        let groups_gpu = engine.buffer::<Group>(1 << settings.tree_depth)?;
 
         let boids = random_boids(n_boids as _, 10.);
         engine.write(boids_gpu, &boids)?;
@@ -116,11 +153,10 @@ impl Simulation {
         Ok(Self {
             n_boids,
             groups_gpu,
-            tree_depth,
+            settings,
             acc_gpu,
             boids_gpu,
             engine,
-            work_groups,
             setup,
             reduce,
             boids,
@@ -139,17 +175,13 @@ impl Simulation {
     }
 
     pub fn step(&mut self) -> Result<Vec<Group>> {
-        eprintln!();
-        eprintln!();
-        eprintln!();
-
         // Setup
         self.boids_dirty = true;
         self.engine.run(
             self.setup,
             self.acc_gpu,
             self.boids_gpu,
-            self.work_groups,
+            self.settings.work_groups,
             1,
             1,
             &[],
@@ -160,22 +192,23 @@ impl Simulation {
         // Build acceleration tree
         let mut total = 0;
         // Tree depth
-        for level in 0..self.tree_depth {
+        for level in 0..self.settings.tree_depth {
             // Mask for each leaf node
-            let mut level_count = 0;
+            //let mut level_count = 0;
             for mask in 0..(1 << level) {
                 // Parent node idx
                 let plane_idx = total; 
 
-                eprintln!(
+                /*eprintln!(
                     "Level: {}, Mask: {:b}, Plane idx: {}",
                     level, mask, plane_idx
-                );
+                );*/
 
                 if let Some(plane) = partitions[plane_idx as usize] {
                     self.select(level, mask, plane)?;
                     let acc = self.reduce()?;
-                    level_count += dbg!(acc.left.count) + dbg!(acc.right.count);
+                    //level_count += dbg!(acc.left.count) + dbg!(acc.right.count);
+                    //level_count += acc.left.count + acc.right.count;
                     partitions.push(acc_to_group(acc.left));
                     partitions.push(acc_to_group(acc.right));
                 } else {
@@ -185,29 +218,22 @@ impl Simulation {
 
                 total += 1;
             }
-            dbg!(level_count);
-            eprintln!();
+            //dbg!((level, level_count));
+            //eprintln!();
         }
 
         // Simulation
-        let leaves = (1 << (self.tree_depth)) as usize - 1;
+        let leaves = (1 << (self.settings.tree_depth)) as usize - 1;
         let groups: Vec<Group> = partitions[leaves..].iter().filter_map(|a| *a).collect();
         self.engine.write(self.groups_gpu, &groups)?;
 
-        let motion_params = MotionParams {
-            n_groups: groups.len() as _,
-            speed: 0.04,
-            dist_thresh: 3.,
-            cohere: 0.5,
-            steer: 0.12,
-            parallel: 0.12,
-        };
+        let motion_params = motion_params_from_settings(&self.settings);
 
         self.engine.run(
             self.motion,
             self.groups_gpu,
             self.boids_gpu,
-            self.work_groups,
+            self.settings.work_groups,
             1,
             1,
             bytemuck::cast_slice(&[motion_params]),
@@ -227,7 +253,7 @@ impl Simulation {
             self.select,
             self.acc_gpu,
             self.boids_gpu,
-            self.work_groups,
+            self.settings.work_groups,
             1,
             1,
             bytemuck::cast_slice(&[select_params]),
@@ -241,7 +267,7 @@ impl Simulation {
                 self.reduce,
                 self.acc_gpu,
                 self.acc_gpu,
-                self.work_groups,
+                self.settings.work_groups,
                 1,
                 1,
                 &stride.to_le_bytes(),
@@ -258,11 +284,13 @@ fn acc_to_group(acc: AccumulatorHalf) -> Option<Group> {
     (acc.count > 0).then(|| {
         let c = acc.count as f32;
         let [x, y, z] = acc.pos;
+
         use rand::Rng;
         let mut rng = rand::thread_rng();
         let hx = rng.gen_range(-1.0..1.0);
         let hy = rng.gen_range(-1.0..1.0);
         let hz = rng.gen_range(-1.0..1.0);
+
         //let [hx, hy, hz] = acc.heading;
         Group {
             center: [x / c, y / c, z / c],

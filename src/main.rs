@@ -1,7 +1,7 @@
 mod sim;
-use sim::{Simulation, Group};
+use sim::{Simulation, Group, Settings};
 
-use anyhow::Result;
+use anyhow::{Result, Context};
 use klystron::{
     runtime_3d::{launch, App},
     DrawType, Engine, FramePacket, Material, Matrix4, Mesh, Object, Vertex, UNLIT_FRAG, UNLIT_VERT,
@@ -10,7 +10,23 @@ use nalgebra::Vector3;
 
 pub fn main() -> Result<()> {
     let vr = std::env::args().skip(1).next().is_some();
-    launch::<MyApp>(vr, ())
+    let settings_path = "settings.yml";
+    let settings = match std::fs::File::open(settings_path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("Could not {}, writing defualts and exiting", settings_path);
+            let file = std::fs::File::create(settings_path)?;
+            serde_yaml::to_writer(file, &Settings::default())?;
+            return Ok(());
+        }
+        Ok(f) => {
+            serde_yaml::from_reader(f).context("Parsing failed")?
+        },
+        e => {
+            return e.context("Failed to read settings.yml").map(|_| ());
+        },
+    };
+
+    launch::<MyApp>(vr, settings)
 }
 
 struct MyApp {
@@ -32,10 +48,10 @@ fn point_towards(vec: Vector3<f32>) -> Matrix4<f32> {
 impl App for MyApp {
     const NAME: &'static str = "Boids";
 
-    type Args = ();
+    type Args = Settings;
 
-    fn new(engine: &mut dyn Engine, _args: Self::Args) -> Result<Self> {
-        let sim = Simulation::new(180, 3)?;
+    fn new(engine: &mut dyn Engine, settings: Self::Args) -> Result<Self> {
+        let sim = Simulation::new(settings)?;
 
         let lines_material = engine.add_material(UNLIT_VERT, UNLIT_FRAG, DrawType::Lines)?;
 
@@ -58,12 +74,13 @@ impl App for MyApp {
     fn next_frame(&mut self, engine: &mut dyn Engine) -> Result<FramePacket> {
         let mut objects = Vec::new();
 
-        if self.frame % 60 == 0 {
+        //if self.frame % 10 == 0 {
             let start = std::time::Instant::now();
             self.planes = self.sim.step()?;
+            dbg!(self.planes.len());
             let elap = start.elapsed();
             println!("{} boid sim took {} ms", self.sim.boids()?.len(), elap.as_secs_f32() * 1000.);
-        }
+        //}
 
         for plane in &self.planes {
             objects.push(Object {
