@@ -285,13 +285,15 @@ fn acc_to_group(acc: AccumulatorHalf) -> Option<Group> {
         let c = acc.count as f32;
         let [x, y, z] = acc.pos;
 
+        /*
         use rand::Rng;
         let mut rng = rand::thread_rng();
         let hx = rng.gen_range(-1.0..1.0);
         let hy = rng.gen_range(-1.0..1.0);
         let hz = rng.gen_range(-1.0..1.0);
+        */
 
-        //let [hx, hy, hz] = acc.heading;
+        let [hx, hy, hz] = acc.heading;
         Group {
             center: [x / c, y / c, z / c],
             heading: [hx / c, hy / c, hz / c],

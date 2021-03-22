@@ -52,7 +52,7 @@ void main() {
 
         float cohere_factor = clamp(cohere - avg_dist, 0., 1.);
         vec3 away = cross(boids[gid].heading.xyz, avg_off);
-        vec3 cohere_head = mix(avg_off, away, cohere_factor);
+        vec3 cohere_head = mix(-avg_off, away, cohere_factor);
 
         vec3 new_heading = normalize(
             boids[gid].heading + 

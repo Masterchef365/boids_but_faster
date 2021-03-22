@@ -1,0 +1,8 @@
+---
+work_groups: 240
+speed: 0.08
+dist_thresh: 6.0
+cohere: 0.5
+steer: 0.12
+parallel: 0.12
+tree_depth: 8
