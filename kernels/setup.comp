@@ -15,6 +15,9 @@ void main() {
     uint gid = gl_GlobalInvocationID.x;
     if (gid >= boids.length()) return;
 
+    boids[gid].level = 0;
+    boids[gid].mask = 0;
+
     acc[gid].left.pos = boids[gid].pos;
     acc[gid].left.heading = boids[gid].heading;
     acc[gid].left.count = 1;
