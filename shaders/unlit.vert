@@ -22,6 +22,6 @@ layout(location = 0) out vec3 fragColor;
 
 void main() {
     gl_Position = camera[gl_ViewIndex] * model * vec4(inPosition, 1.0);
-    fragColor = normalize(model[0].xyz);
+    fragColor = abs(normalize(model[0].xyz));
 }
 

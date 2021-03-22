@@ -485,7 +485,6 @@ dependencies = [
 [[package]]
 name = "klystron"
 version = "0.1.0"
-source = "git+https://github.com/Masterchef365/klystron.git?branch=master#17abe245e86884e87ad517066bb8cd747ae82287"
 dependencies = [
  "anyhow",
  "bytemuck",
