@@ -29,7 +29,7 @@ void main() {
     vec3 avg_heading = vec3(0);
     float avg_dist = 0.;
     uint total = 0;
-    for (uint i = (gid * 89) % downsample; i < read.length(); i += downsample) {
+    for (uint i = int(gid * boid.pos.x * 90.) % downsample; i < read.length(); i += downsample) {
         if (gid == i) {
             continue;
         }
@@ -49,9 +49,9 @@ void main() {
         avg_heading = normalize(avg_heading);
         avg_dist /= float(total);
 
-        float cohere_factor = clamp(cohere - avg_dist, 0., 1.);
+        //float cohere_factor = clamp(cohere - avg_dist, 0., 1.);
         vec3 away = cross(boid.heading, avg_off);
-        vec3 cohere_head = mix(-avg_off, away, cohere_factor);
+        vec3 cohere_head = mix(-avg_off, away, cohere);
 
         vec3 new_heading = normalize(
             boid.heading + 
