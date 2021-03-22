@@ -29,7 +29,7 @@ void main() {
     vec3 avg_heading = vec3(0);
     float avg_dist = 0.;
     uint total = 0;
-    for (uint i = gid % downsample; i < read.length(); i += downsample) {
+    for (uint i = (gid * 8) % downsample; i < read.length(); i += downsample) {
         if (gid == i) {
             continue;
         }
